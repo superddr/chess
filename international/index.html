@@ -337,12 +337,17 @@ async function api(path, data) {
       if (!sub.result.ok) throw new Error(sub.result.error || '服务错误');
       return sub.result;
     }
-    // 长轮询：服务器抱着请求直到算完才应答，不受浏览器定时器节流影响
+    // 长轮询（10秒一轮，避免代理掐长连接）；失败立即重试不依赖定时器
     let n = 0;
     while (true) {
       let j;
-      try { j = await rawApi('/api/job', { id: sub.job, wait: 25 }); n = 0; }
-      catch (e) { noteReconnect(++n); await sleep(Math.min(1000 * n, 5000)); continue; }
+      try { j = await rawApi('/api/job', { id: sub.job, wait: 10 }); n = 0; }
+      catch (e) {
+        n++;
+        noteReconnect(n);
+        if (n >= 3) await sleep(800);
+        continue;
+      }
       if (!j.ok) throw new Error(j.error || '服务错误');
       if (j.status === 'done') {
         if (!j.result.ok) throw new Error(j.result.error || '服务错误');
@@ -803,6 +808,10 @@ $('blackSrc').onchange = () => {
   }
 };
 
+// 渲染保险丝：省电模式/后台节流下也保证界面最终刷新
+setInterval(() => { requestAnimationFrame(render); }, 900);
+window.addEventListener('focus', () => render());
+document.addEventListener('visibilitychange', () => render());
 buildPalette();
 refreshPalette();
 resize();
