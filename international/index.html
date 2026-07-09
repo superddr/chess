@@ -333,9 +333,14 @@ async function api(path, data) {
   if (JOB_APIS.has(path)) {
     const sub = await withRetry(() => rawApi(path, data));
     if (!sub.ok) throw new Error(sub.error || '服务错误');
-    let n = 0;
+    if (sub.status === 'done') {          // 快棋：提交时已算完
+      if (!sub.result.ok) throw new Error(sub.result.error || '服务错误');
+      return sub.result;
+    }
+    let n = 0, wait = 250;
     while (true) {
-      await sleep(1000);
+      await sleep(wait);
+      wait = Math.min(wait * 1.6, 1200);
       let j;
       try { j = await rawApi('/api/job', { id: sub.job }); n = 0; }
       catch (e) { noteReconnect(++n); await sleep(Math.min(1000 * n, 5000)); continue; }

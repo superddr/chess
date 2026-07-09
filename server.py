@@ -296,16 +296,25 @@ def _run_job(jid, fn, data):
 
 def submit_job(path, fn, data):
     """任务 id 由请求内容哈希而来：断线后客户端重发同一请求会命中同一个
-    正在计算的任务，而不是重新起一个。"""
+    正在计算的任务，而不是重新起一个。
+    短暂等待一下：快棋（唯一应法等）直接随提交响应同步返回，免去轮询延迟。"""
     raw = json.dumps(data, sort_keys=True, ensure_ascii=False)
     jid = hashlib.md5((path + '|' + raw).encode('utf-8')).hexdigest()
+    th = None
     with JOBS_LOCK:
         now = time.time()
         for k in [k for k, v in JOBS.items() if now - v['t'] > JOB_TTL]:
             del JOBS[k]
         if jid not in JOBS:
             JOBS[jid] = {'t': now, 'done': False, 'result': None}
-            threading.Thread(target=_run_job, args=(jid, fn, data), daemon=True).start()
+            th = threading.Thread(target=_run_job, args=(jid, fn, data), daemon=True)
+    if th:
+        th.start()
+        th.join(0.35)
+    with JOBS_LOCK:
+        job = JOBS.get(jid)
+        if job and job['done']:
+            return {'ok': True, 'job': jid, 'status': 'done', 'result': job['result']}
     return {'ok': True, 'job': jid}
 
 

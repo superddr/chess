@@ -632,6 +632,9 @@ def search_best(board, side, time_limit=2.0, banned=(), penalty=None, draw_moves
         return rest[0], 0, 1
     rest.sort(key=lambda m: VALUES[board[m[0]].upper()] - 10 * VALUES[board[m[1]].upper()]
               if board[m[1]] != EMPTY else 10 ** 6)
+    if len(rest) <= 3:
+        # 应法寥寥（如被将军只能退），按候选数缩减时限，不必想满
+        deadline = min(deadline, time.time() + time_limit * 0.25 * len(rest))
     if len(rest) == 1:
         seed = [(''.join(board), side, in_check(board, side))]
         S = Searcher(deadline, seed, histcnt)
