@@ -337,12 +337,11 @@ async function api(path, data) {
       if (!sub.result.ok) throw new Error(sub.result.error || '服务错误');
       return sub.result;
     }
-    let n = 0, wait = 250;
+    // 长轮询：服务器抱着请求直到算完才应答，不受浏览器定时器节流影响
+    let n = 0;
     while (true) {
-      await sleep(wait);
-      wait = Math.min(wait * 1.6, 1200);
       let j;
-      try { j = await rawApi('/api/job', { id: sub.job }); n = 0; }
+      try { j = await rawApi('/api/job', { id: sub.job, wait: 25 }); n = 0; }
       catch (e) { noteReconnect(++n); await sleep(Math.min(1000 * n, 5000)); continue; }
       if (!j.ok) throw new Error(j.error || '服务错误');
       if (j.status === 'done') {

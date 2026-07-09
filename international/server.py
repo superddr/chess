@@ -235,14 +235,23 @@ def submit_job(path, fn, data):
 
 
 def api_job(data):
+    """支持长轮询：wait>0 时由服务器抱着请求直到任务完成或超时。"""
     jid = str(data.get('id', ''))
-    with JOBS_LOCK:
-        job = JOBS.get(jid)
-        if job is None:
-            return {'ok': False, 'error': '任务已过期，请重新操作'}
-        if not job['done']:
+    try:
+        wait = min(float(data.get('wait', 0)), 30.0)
+    except (TypeError, ValueError):
+        wait = 0.0
+    t_end = time.time() + wait
+    while True:
+        with JOBS_LOCK:
+            job = JOBS.get(jid)
+            if job is None:
+                return {'ok': False, 'error': '任务已过期，请重新操作'}
+            if job['done']:
+                return {'ok': True, 'status': 'done', 'result': job['result']}
+        if time.time() >= t_end:
             return {'ok': True, 'status': 'running'}
-        return {'ok': True, 'status': 'done', 'result': job['result']}
+        time.sleep(0.15)
 
 
 ROUTES = {
