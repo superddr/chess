@@ -1,0 +1,867 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>中国象棋残局研究器</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+    background: #efe7d8; color: #3a2c1a; min-height: 100vh;
+  }
+  header { text-align: center; padding: 12px 8px 4px; }
+  header h1 { font-size: clamp(18px, 4.5vw, 26px); letter-spacing: 2px; color: #6b3f1d; }
+  .wrap {
+    display: flex; flex-wrap: wrap; gap: 14px; justify-content: center;
+    align-items: flex-start; padding: 10px; max-width: 1000px; margin: 0 auto;
+  }
+  #boardBox { width: min(94vw, 480px); flex: 0 0 auto; }
+  canvas { width: 100%; display: block; touch-action: manipulation; user-select: none;
+           border-radius: 10px; box-shadow: 0 4px 16px rgba(0,0,0,.25); }
+  .panel {
+    flex: 1 1 280px; max-width: 480px; min-width: 260px;
+    background: #fffdf7; border-radius: 12px; padding: 14px;
+    box-shadow: 0 2px 10px rgba(0,0,0,.12);
+  }
+  .status { font-size: 17px; font-weight: bold; min-height: 24px; color: #8a2b12; }
+  .sub { font-size: 13px; color: #7a6a52; min-height: 18px; margin: 4px 0 10px; }
+  .ptitle { font-size: 13px; color: #7a6a52; margin: 8px 0 4px; }
+  .pal { display: flex; flex-wrap: wrap; gap: 6px; }
+  .pbtn {
+    width: 46px; height: 46px; border-radius: 50%; border: 2px solid #b08c5a;
+    background: radial-gradient(circle at 35% 30%, #fdf3dd, #ecd7ae);
+    font-size: 22px; font-family: "KaiTi", "STKaiti", serif; font-weight: bold;
+    cursor: pointer; position: relative; line-height: 1;
+  }
+  .pbtn.red { color: #b91c1c; } .pbtn.blk { color: #1f2937; }
+  .pbtn .cnt {
+    position: absolute; right: -4px; top: -4px; background: #6b3f1d; color: #fff;
+    font-size: 10px; font-family: sans-serif; border-radius: 8px; padding: 1px 5px;
+  }
+  .pbtn.sel { outline: 3px solid #16a34a; outline-offset: 2px; }
+  .pbtn:disabled { opacity: .35; cursor: default; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; align-items: center; }
+  button.act, select {
+    padding: 9px 14px; border-radius: 8px; border: 1px solid #c9b48c;
+    background: #f7efdc; color: #4a3517; font-size: 14px; cursor: pointer;
+  }
+  button.act:active { transform: scale(.97); }
+  button.act.sel { outline: 3px solid #16a34a; outline-offset: 1px; }
+  button.primary {
+    width: 100%; margin-top: 12px; padding: 12px; font-size: 16px; font-weight: bold;
+    border: none; border-radius: 10px; background: #b91c1c; color: #fff; cursor: pointer;
+  }
+  button.primary:disabled { background: #bda98f; }
+  #hintBtn { background: #15803d; }
+  .log {
+    margin-top: 12px; max-height: 180px; overflow-y: auto; font-size: 13px;
+    background: #f6f0e2; border-radius: 8px; padding: 8px 10px; line-height: 1.7;
+  }
+  .log .r { color: #b91c1c; } .log .b { color: #1f2937; }
+  #toast {
+    position: fixed; left: 50%; bottom: 12%; transform: translateX(-50%);
+    background: rgba(40,25,10,.92); color: #ffe9c9; padding: 10px 18px;
+    border-radius: 10px; font-size: 15px; opacity: 0; pointer-events: none;
+    transition: opacity .25s; max-width: 86vw; text-align: center; z-index: 99;
+  }
+  #toast.show { opacity: 1; }
+  #modal {
+    position: fixed; inset: 0; background: rgba(30,20,8,.55); z-index: 50;
+    display: flex; align-items: center; justify-content: center; padding: 12px;
+  }
+  #modal[hidden] { display: none; }
+  .mcard {
+    background: #fffdf7; border-radius: 12px; padding: 16px;
+    width: min(94vw, 520px); box-shadow: 0 8px 30px rgba(0,0,0,.35);
+  }
+  #mtitle { font-weight: bold; margin-bottom: 8px; color: #6b3f1d; }
+  #mtext {
+    width: 100%; height: min(46vh, 320px); resize: vertical;
+    border: 1px solid #c9b48c; border-radius: 8px; padding: 8px;
+    font-size: 13px; line-height: 1.5; background: #fbf6ea; color: #3a2c1a;
+  }
+  .spin { display: inline-block; width: 14px; height: 14px; border: 2px solid #b91c1c;
+          border-top-color: transparent; border-radius: 50%; animation: sp 1s linear infinite;
+          vertical-align: -2px; margin-right: 6px; }
+  @keyframes sp { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<header>
+  <h1>♜ 中国象棋 · 残局研究器</h1>
+  <a id="intlLink" href="#" style="font-size:13px;color:#7a6a52">⇄ 切换到国际象棋版</a>
+</header>
+<div class="wrap">
+  <div id="boardBox"><canvas id="cv"></canvas></div>
+  <div class="panel">
+    <div id="status" class="status">布置残局：先点选下方棋子，再点击棋盘放置</div>
+    <div id="sub" class="sub">红方为玩家（下方），黑方为 AI（上方）</div>
+
+    <div id="setupPanel">
+      <div class="ptitle">红方棋子（玩家 · 下方）</div>
+      <div id="redPal" class="pal"></div>
+      <div class="ptitle">黑方棋子（AI · 上方）</div>
+      <div id="blackPal" class="pal"></div>
+      <div class="row">
+        <button id="openingBtn" class="act">⚔ 标准开局</button>
+        <button id="eraseBtn" class="act">🧹 移除棋子</button>
+        <button id="clearBtn" class="act">清空棋盘</button>
+        <button id="exportBtn" class="act">📋 导出局面</button>
+        <button id="importBtn" class="act">📥 导入局面</button>
+        <select id="presetSel">
+          <option value="">— 载入示例残局 —</option>
+          <option value="mhp">马后炮杀势（红先胜）</option>
+          <option value="pp">双兵对双士</option>
+        </select>
+      </div>
+      <button id="startBtn" class="primary">▶ 开始对弈（红方先行）</button>
+    </div>
+
+    <div id="playPanel" hidden>
+      <button id="hintBtn" class="primary">💡 求助：给出最佳走法</button>
+      <div class="row">
+        <button id="undoBtn" class="act">↩ 悔棋</button>
+        <button id="retryBtn" class="act">🔄 重试本局</button>
+        <button id="setupBtn" class="act">🛠 重新布局</button>
+        <button id="exportBtn2" class="act">📋 导出局面</button>
+      </div>
+      <div class="row">
+        <label style="font-size:14px">黑方由：
+          <select id="blackSrc">
+            <option value="ai" selected>本机 AI 应招</option>
+            <option value="manual">手动代走（对战外部 AI）</option>
+          </select>
+        </label>
+        <button id="aiPlayBtn" class="act" hidden>🤖 AI 代走黑棋</button>
+      </div>
+      <div class="row">
+        <label style="font-size:14px">AI 棋力：
+          <select id="levelSel">
+            <option value="1">快速 (1秒)</option>
+            <option value="4">较快 (4秒)</option>
+            <option value="16" selected>标准 (16秒)</option>
+            <option value="64">深算 (64秒)</option>
+            <option value="256">长考 (256秒)</option>
+          </select>
+        </label>
+      </div>
+      <div id="moveLog" class="log" hidden></div>
+    </div>
+  </div>
+</div>
+<div id="toast"></div>
+<div id="modal" hidden>
+  <div class="mcard">
+    <div id="mtitle">导出局面</div>
+    <textarea id="mtext" spellcheck="false"></textarea>
+    <div class="row">
+      <button id="mcopy" class="act">📋 复制全部</button>
+      <button id="mload" class="act">📥 载入此局面</button>
+      <button id="mclose" class="act">关闭</button>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+/* ---------- 常量 ---------- */
+const CHARS = {K:'帥',A:'仕',B:'相',N:'馬',R:'車',C:'炮',P:'兵',
+               k:'將',a:'士',b:'象',n:'馬',r:'車',c:'砲',p:'卒'};
+const MAXC = {K:1,A:2,B:2,N:2,R:2,C:2,P:5};
+const NUM_CN = ['一','二','三','四','五','六','七','八','九'];
+const LW = 560, LH = 620, M = 40, S = 60;   // 画布逻辑尺寸
+
+/* ---------- 状态 ---------- */
+let board = Array(90).fill('.');
+let mode = 'setup';           // setup | play | over
+let turn = 'r';               // 当前轮到哪方 'r' | 'b'
+let curPiece = null;          // 摆子面板选中的棋子, 'erase' 为移除模式
+let sel = -1;                 // 对弈中选中的己方棋子
+let allMoves = [];            // 当前行棋方全部合法走法 [[f,t],...]
+let lastMove = null, hintMove = null;
+let history = [];             // 局面历史（长将判定用）
+let startBoard = null;        // 开局布置（重试用）
+let snaps = [];               // 悔棋快照
+let busy = false;
+let moveNo = 0;
+
+/* ---------- DOM ---------- */
+const $ = id => document.getElementById(id);
+const cv = $('cv'), ctx = cv.getContext('2d');
+let scale = 1;
+
+/* ---------- 画布 ---------- */
+function resize() {
+  const w = $('boardBox').clientWidth;
+  const dpr = window.devicePixelRatio || 1;
+  cv.width = Math.round(w * dpr);
+  cv.height = Math.round(w * LH / LW * dpr);
+  cv.style.height = (w * LH / LW) + 'px';
+  scale = w * dpr / LW;
+  render();
+}
+window.addEventListener('resize', resize);
+
+const X = c => M + c * S, Y = r => M + r * S;
+
+function drawTick(r, c) { // 炮位/兵位小角标
+  const x = X(c), y = Y(r), d = 5, g = 3;
+  ctx.beginPath();
+  for (const [sx, sy] of [[-1,-1],[1,-1],[-1,1],[1,1]]) {
+    const cc = c + sx, nx = x + sx*g, ny = y + sy*g;
+    if (cc < 0 || cc > 8) continue;
+    ctx.moveTo(nx + sx*d, ny); ctx.lineTo(nx, ny); ctx.lineTo(nx, ny + sy*d);
+  }
+  ctx.stroke();
+}
+
+function render() {
+  const btn = $('aiPlayBtn');
+  if (btn) btn.hidden = !(mode === 'play' && manualBlack() && turn === 'b');
+  if (!busy && typeof saveState === 'function') saveState();  // 空闲时随手存档
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  ctx.clearRect(0, 0, LW, LH);
+  // 木纹底
+  const bg = ctx.createLinearGradient(0, 0, LW, LH);
+  bg.addColorStop(0, '#f4dcab'); bg.addColorStop(1, '#e9c98d');
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, LW, LH);
+
+  ctx.strokeStyle = '#7a5230'; ctx.lineWidth = 1.2;
+  // 横线
+  for (let r = 0; r < 10; r++) {
+    ctx.beginPath(); ctx.moveTo(X(0), Y(r)); ctx.lineTo(X(8), Y(r)); ctx.stroke();
+  }
+  // 竖线（中间被楚河隔断）
+  for (let c = 0; c < 9; c++) {
+    if (c === 0 || c === 8) {
+      ctx.beginPath(); ctx.moveTo(X(c), Y(0)); ctx.lineTo(X(c), Y(9)); ctx.stroke();
+    } else {
+      ctx.beginPath(); ctx.moveTo(X(c), Y(0)); ctx.lineTo(X(c), Y(4)); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(X(c), Y(5)); ctx.lineTo(X(c), Y(9)); ctx.stroke();
+    }
+  }
+  // 外框
+  ctx.lineWidth = 3;
+  ctx.strokeRect(X(0) - 6, Y(0) - 6, 8 * S + 12, 9 * S + 12);
+  ctx.lineWidth = 1.2;
+  // 九宫斜线
+  for (const [r1,c1,r2,c2] of [[0,3,2,5],[0,5,2,3],[7,3,9,5],[7,5,9,3]]) {
+    ctx.beginPath(); ctx.moveTo(X(c1), Y(r1)); ctx.lineTo(X(c2), Y(r2)); ctx.stroke();
+  }
+  // 炮位、兵位角标
+  for (const [r,c] of [[2,1],[2,7],[7,1],[7,7]]) drawTick(r,c);
+  for (const r of [3,6]) for (const c of [0,2,4,6,8]) drawTick(r,c);
+  // 楚河汉界
+  ctx.fillStyle = 'rgba(122,82,48,.75)';
+  ctx.font = '26px "KaiTi","STKaiti",serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('楚  河', X(2), Y(4.5));
+  ctx.fillText('漢  界', X(6), Y(4.5));
+  // 纵线编号：上黑(1-9)、下红(九-一)
+  ctx.font = '13px sans-serif'; ctx.fillStyle = 'rgba(90,60,30,.7)';
+  for (let c = 0; c < 9; c++) {
+    ctx.fillText(String(c + 1), X(c), Y(0) - 22);
+    ctx.fillText(NUM_CN[8 - c], X(c), Y(9) + 22);
+  }
+  // 最后一步标记
+  if (lastMove) for (const i of lastMove) mark(i, '#2563eb');
+  // 求助建议
+  if (hintMove) {
+    for (const i of hintMove) mark(i, '#16a34a', 3.5);
+    arrow(hintMove[0], hintMove[1], '#16a34a');
+  }
+  // 棋子
+  for (let i = 0; i < 90; i++) if (board[i] !== '.') drawPiece(i, board[i]);
+  // 选中与可走点
+  if (sel >= 0) {
+    ring(sel, '#f59e0b');
+    for (const [f, t] of allMoves) if (f === sel) {
+      const x = X(t % 9), y = Y(Math.floor(t / 9));
+      ctx.beginPath(); ctx.arc(x, y, board[t] === '.' ? 8 : 25, 0, 7);
+      ctx.fillStyle = 'rgba(22,163,74,.45)';
+      if (board[t] === '.') ctx.fill();
+      else { ctx.strokeStyle = 'rgba(22,163,74,.9)'; ctx.lineWidth = 4; ctx.stroke(); }
+    }
+  }
+}
+
+function drawPiece(i, p) {
+  const x = X(i % 9), y = Y(Math.floor(i / 9)), R = S * 0.44;
+  ctx.beginPath(); ctx.arc(x, y + 2, R, 0, 7);
+  ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.fill();           // 阴影
+  const g = ctx.createRadialGradient(x - R/3, y - R/3, R/6, x, y, R);
+  g.addColorStop(0, '#fdf6e3'); g.addColorStop(1, '#eed9ac');
+  ctx.beginPath(); ctx.arc(x, y, R, 0, 7); ctx.fillStyle = g; ctx.fill();
+  const red = p === p.toUpperCase();
+  ctx.lineWidth = 2; ctx.strokeStyle = red ? '#b91c1c' : '#374151'; ctx.stroke();
+  ctx.beginPath(); ctx.arc(x, y, R - 4, 0, 7); ctx.lineWidth = 1; ctx.stroke();
+  ctx.fillStyle = red ? '#b91c1c' : '#1f2937';
+  ctx.font = 'bold ' + (S * 0.55) + 'px "KaiTi","STKaiti",serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(CHARS[p], x, y + 2);
+}
+
+function mark(i, color, w) { // 四角框标记
+  const x = X(i % 9), y = Y(Math.floor(i / 9)), d = S * 0.42, L = 9;
+  ctx.strokeStyle = color; ctx.lineWidth = w || 2.5;
+  ctx.beginPath();
+  for (const [sx, sy] of [[-1,-1],[1,-1],[-1,1],[1,1]]) {
+    ctx.moveTo(x + sx*d - sx*L, y + sy*d); ctx.lineTo(x + sx*d, y + sy*d);
+    ctx.lineTo(x + sx*d, y + sy*d - sy*L);
+  }
+  ctx.stroke();
+}
+
+function ring(i, color) {
+  const x = X(i % 9), y = Y(Math.floor(i / 9));
+  ctx.beginPath(); ctx.arc(x, y, S * 0.5, 0, 7);
+  ctx.strokeStyle = color; ctx.lineWidth = 3.5; ctx.stroke();
+}
+
+function arrow(f, t, color) {
+  const x1 = X(f % 9), y1 = Y(Math.floor(f / 9)), x2 = X(t % 9), y2 = Y(Math.floor(t / 9));
+  const a = Math.atan2(y2 - y1, x2 - x1), R = S * 0.5;
+  const sx = x1 + Math.cos(a) * R, sy = y1 + Math.sin(a) * R;
+  const ex = x2 - Math.cos(a) * R, ey = y2 - Math.sin(a) * R;
+  ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 4; ctx.lineCap = 'round';
+  ctx.setLineDash([8, 6]);
+  ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ex, ey); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.moveTo(ex + Math.cos(a) * 10, ey + Math.sin(a) * 10);
+  ctx.lineTo(ex - Math.cos(a - .5) * 10, ey - Math.sin(a - .5) * 10);
+  ctx.lineTo(ex - Math.cos(a + .5) * 10, ey - Math.sin(a + .5) * 10);
+  ctx.fill();
+}
+
+/* ---------- 工具 ---------- */
+let toastTimer;
+function toast(msg) {
+  const t = $('toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 2200);
+}
+function setStatus(main, sub) {
+  $('status').innerHTML = main;
+  if (sub !== undefined) $('sub').textContent = sub;
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+async function rawApi(path, data) {   // 网络断开 / 服务无响应时会抛异常
+  const res = await fetch(path, { method: 'POST',
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+  return await res.json();
+}
+
+function noteReconnect(n) {
+  $('sub').textContent = '📡 连接中断，正在自动重连（第 ' + n + ' 次）…服务器仍在计算，不会丢';
+}
+
+async function withRetry(fn) {        // 网络类错误无限重试；业务错误原样返回
+  let n = 0;
+  while (true) {
+    try {
+      const r = await fn();
+      if (n) $('sub').textContent = '✅ 已重新连接';
+      return r;
+    } catch (e) {
+      noteReconnect(++n);
+      await sleep(Math.min(1000 * n, 5000));
+    }
+  }
+}
+
+const JOB_APIS = new Set(['/api/move', '/api/aimove', '/api/hint']);
+
+async function api(path, data) {
+  if (JOB_APIS.has(path)) {
+    // 长耗时接口：提交任务后轮询结果。任务 id 由请求内容决定，
+    // 断线后重发同一请求会接回原任务，服务器从未停止计算。
+    const sub = await withRetry(() => rawApi(path, data));
+    if (!sub.ok) throw new Error(sub.error || '服务错误');
+    let n = 0;
+    while (true) {
+      await sleep(1000);
+      let j;
+      try { j = await rawApi('/api/job', { id: sub.job }); n = 0; }
+      catch (e) { noteReconnect(++n); await sleep(Math.min(1000 * n, 5000)); continue; }
+      if (!j.ok) throw new Error(j.error || '服务错误');
+      if (j.status === 'done') {
+        if (!j.result.ok) throw new Error(j.result.error || '服务错误');
+        return j.result;
+      }
+    }
+  }
+  const j = await withRetry(() => rawApi(path, data));
+  if (!j.ok) throw new Error(j.error || '服务错误');
+  return j;
+}
+const boardStr = () => board.join('');
+const level = () => Number($('levelSel').value);
+const manualBlack = () => $('blackSrc').value === 'manual';
+
+/* ---------- 对局存档：断线/刷新/关页后可恢复 ---------- */
+const SAVE_KEY = 'xiangqi_endgame_v1';
+function saveState() {
+  try {
+    if (mode === 'setup') {
+      localStorage.setItem(SAVE_KEY, JSON.stringify({ mode: 'setup', board: boardStr() }));
+      return;
+    }
+    localStorage.setItem(SAVE_KEY, JSON.stringify({
+      mode, turn, board: boardStr(), history,
+      startBoard: startBoard && startBoard.join(''),
+      snaps: snaps.map(s => ({ ...s, board: s.board.join('') })),
+      moveNo, log: $('moveLog').innerHTML, lastMove,
+      blackSrc: $('blackSrc').value, level: $('levelSel').value,
+    }));
+  } catch (e) { /* 存储满等情况忽略 */ }
+}
+function restoreState() {
+  let s;
+  try { s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); } catch (e) { s = null; }
+  if (!s || !s.board) return;
+  try {
+    board = s.board.split('');
+    if (s.mode === 'setup') { refreshPalette(); render(); return; }
+    turn = s.turn || 'r';
+    history = s.history || [];
+    startBoard = s.startBoard ? s.startBoard.split('') : null;
+    snaps = (s.snaps || []).map(x => ({ ...x, board: x.board.split('') }));
+    moveNo = s.moveNo || 0;
+    lastMove = s.lastMove || null;
+    $('moveLog').innerHTML = s.log || '';
+    $('moveLog').hidden = !s.log;
+    $('blackSrc').value = s.blackSrc || 'ai';
+    $('levelSel').value = s.level || '16';
+    mode = 'play';
+    $('setupPanel').hidden = true;
+    $('playPanel').hidden = false;
+    fetchMoves().then(() => { turnStatus('已恢复上次对局'); render(); });
+    toast('已恢复上次对局');
+  } catch (e) { localStorage.removeItem(SAVE_KEY); }
+}
+function turnStatus(extraSub) {
+  if (turn === 'r') setStatus('轮到红方走棋', extraSub || '');
+  else setStatus('请代黑方走棋（输入外部对手的走法）',
+                 extraSub || '点击黑方棋子并落子；或点「AI 代走黑棋」');
+}
+
+/* ---------- 中文着法表示 ---------- */
+function moveText(bd, f, t) {
+  const p = bd[f], red = p === p.toUpperCase(), name = CHARS[p];
+  const fr = Math.floor(f / 9), fc = f % 9, tr = Math.floor(t / 9), tc = t % 9;
+  const colName = c => red ? NUM_CN[8 - c] : String(c + 1);
+  let prefix = '';
+  const same = [];
+  for (let r2 = 0; r2 < 10; r2++) if (bd[r2 * 9 + fc] === p) same.push(r2);
+  if (same.length > 1) {
+    if (!red) same.reverse();          // “前”=靠近对方一侧
+    const k = same.indexOf(fr), n = same.length;
+    prefix = n === 2 ? (k === 0 ? '前' : '后')
+           : n === 3 ? ['前', '中', '后'][k]
+           : (k === 0 ? '前' : k === n - 1 ? '后' : ['二', '三', '四'][k - 1]);
+  }
+  let action, num;
+  if (tr === fr) { action = '平'; num = colName(tc); }
+  else {
+    action = (red ? tr < fr : tr > fr) ? '进' : '退';
+    num = 'RCPKrcpk'.includes(p)
+      ? (red ? NUM_CN[Math.abs(tr - fr) - 1] : String(Math.abs(tr - fr)))
+      : colName(tc);
+  }
+  return (prefix ? prefix + name : name + colName(fc)) + action + num;
+}
+function logMove(side, text) {
+  const log = $('moveLog'); log.hidden = false;
+  if (side === '红') moveNo++;
+  const div = document.createElement('div');
+  div.className = side === '红' ? 'r' : 'b';
+  div.textContent = (side === '红' ? moveNo + '. ' : '　 ') + side + '：' + text;
+  log.appendChild(div); log.scrollTop = log.scrollHeight;
+}
+
+/* ---------- 摆子面板 ---------- */
+function buildPalette() {
+  for (const [elId, cls, pieces] of [
+      ['redPal', 'red', 'KABNRCP'], ['blackPal', 'blk', 'kabnrcp']]) {
+    const el = $(elId);
+    for (const p of pieces) {
+      const b = document.createElement('button');
+      b.className = 'pbtn ' + cls; b.dataset.piece = p;
+      b.innerHTML = CHARS[p] + '<span class="cnt"></span>';
+      b.onclick = () => {
+        curPiece = curPiece === p ? null : p;
+        refreshPalette();
+      };
+      el.appendChild(b);
+    }
+  }
+}
+function refreshPalette() {
+  document.querySelectorAll('.pbtn').forEach(b => {
+    const p = b.dataset.piece;
+    const used = board.filter(x => x === p).length;
+    const left = MAXC[p.toUpperCase()] - used;
+    b.querySelector('.cnt').textContent = left;
+    b.disabled = left <= 0 && curPiece !== p;
+    b.classList.toggle('sel', curPiece === p);
+  });
+  $('eraseBtn').classList.toggle('sel', curPiece === 'erase');
+}
+
+/* ---------- 摆子位置校验（与服务端一致） ---------- */
+const ADV_R = new Set([84, 86, 76, 66, 68]);        // (9,3)(9,5)(8,4)(7,3)(7,5)
+const ADV_B = new Set([3, 5, 13, 21, 23]);
+const ELE_R = new Set([83, 87, 63, 67, 71, 47, 51]);
+const ELE_B = new Set([2, 6, 18, 22, 26, 38, 42]);
+function setupErr(p, i) {
+  const r = Math.floor(i / 9), c = i % 9;
+  switch (p) {
+    case 'K': return (c >= 3 && c <= 5 && r >= 7) ? null : '帅必须放在红方九宫内';
+    case 'k': return (c >= 3 && c <= 5 && r <= 2) ? null : '将必须放在黑方九宫内';
+    case 'A': return ADV_R.has(i) ? null : '仕只能放在红方九宫斜线交点';
+    case 'a': return ADV_B.has(i) ? null : '士只能放在黑方九宫斜线交点';
+    case 'B': return ELE_R.has(i) ? null : '相只能放在红方象位';
+    case 'b': return ELE_B.has(i) ? null : '象只能放在黑方象位';
+    case 'P': return (r <= 4 || (r <= 6 && c % 2 === 0)) ? null : '兵不能放在这里（未过河只能在兵线上）';
+    case 'p': return (r >= 5 || (r >= 3 && c % 2 === 0)) ? null : '卒不能放在这里（未过河只能在卒线上）';
+    default: return null;
+  }
+}
+
+/* ---------- 点击棋盘 ---------- */
+cv.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  const rect = cv.getBoundingClientRect();
+  const x = (e.clientX - rect.left) / rect.width * LW;
+  const y = (e.clientY - rect.top) / rect.height * LH;
+  const c = Math.round((x - M) / S), r = Math.round((y - M) / S);
+  if (c < 0 || c > 8 || r < 0 || r > 9) return;
+  const dx = x - X(c), dy = y - Y(r);
+  if (dx * dx + dy * dy > (S * 0.48) ** 2) return;
+  onPoint(r * 9 + c);
+});
+
+function onPoint(i) {
+  if (mode === 'setup') return setupClick(i);
+  if (mode !== 'play' || busy) return;
+  if (turn === 'b' && !manualBlack()) return;
+  hintMove = null;
+  const p = board[i];
+  const own = p !== '.' && ((p === p.toUpperCase()) === (turn === 'r'));
+  if (sel >= 0 && allMoves.some(([f, t]) => f === sel && t === i)) return doMove(sel, i);
+  if (own) {
+    sel = sel === i ? -1 : i;
+  } else if (sel >= 0) {
+    if (p !== '.') toast('不能走到那里');
+    sel = -1;
+  }
+  render();
+}
+
+function setupClick(i) {
+  if (curPiece && curPiece !== 'erase') {
+    if (board[i] === curPiece) { board[i] = '.'; }   // 点同子=拿起
+    else {
+      const used = board.filter(x => x === curPiece).length - (board[i] === curPiece ? 1 : 0);
+      if (used >= MAXC[curPiece.toUpperCase()]) return toast('该棋子数量已用完');
+      const err = setupErr(curPiece, i);
+      if (err) return toast(err);
+      board[i] = curPiece;
+    }
+  } else {
+    if (board[i] === '.') { if (curPiece === 'erase') return; return; }
+    board[i] = '.';
+  }
+  refreshPalette(); render();
+}
+
+/* ---------- 对弈流程 ---------- */
+async function fetchMoves() {
+  try {
+    const j = await api('/api/moves', { board: boardStr(), side: turn });
+    allMoves = j.moves;
+  } catch (e) { toast(e.message); }
+}
+
+async function startGame() {
+  try {
+    $('startBtn').disabled = true;
+    await api('/api/start', { board: boardStr() });
+    startBoard = board.slice();
+    history = [boardStr() + 'r'];
+    snaps = []; sel = -1; lastMove = null; hintMove = null; moveNo = 0; turn = 'r';
+    $('moveLog').innerHTML = ''; $('moveLog').hidden = true;
+    mode = 'play';
+    $('setupPanel').hidden = true; $('playPanel').hidden = false;
+    await fetchMoves();
+    setStatus('对弈开始，请红方走棋', '点击己方棋子，再点击目标位置');
+    render();
+  } catch (e) { toast(e.message); }
+  finally { $('startBtn').disabled = false; }
+}
+
+function snapshot() {
+  snaps.push({ board: board.slice(), history: history.slice(), turn: turn,
+               lastMove: lastMove, moveNo: moveNo, log: $('moveLog').innerHTML });
+}
+async function restoreSnap() {
+  const s = snaps.pop();
+  board = s.board; history = s.history; turn = s.turn; lastMove = s.lastMove;
+  moveNo = s.moveNo; $('moveLog').innerHTML = s.log;
+  await fetchMoves();
+}
+const OVER_ICON = { red: '🎉 ', black: '😔 ', draw: '🤝 ' };
+
+async function doMove(f, t) {
+  snapshot();
+  const text = moveText(board, f, t);
+  const prevBoard = board.slice();
+  const mover = turn;
+  board[t] = board[f]; board[f] = '.';
+  sel = -1; lastMove = [f, t]; hintMove = null;
+  busy = true; render();
+  logMove(mover === 'r' ? '红' : '黑', text);
+  try {
+    if (mover === 'r' && !manualBlack()) {
+      // 本机 AI 应招模式
+      setStatus('<span class="spin"></span>黑方思考中…', '');
+      const j = await api('/api/move', {
+        board: prevBoard.join(''), history, from: f, to: t, time: level() });
+      history.push(j.playerKey);
+      if (j.gameOver && !j.aiMove) return finish(OVER_ICON[j.gameOver] + j.message);
+      const aiText = moveText(board, j.aiMove.from, j.aiMove.to);
+      board = j.board.split('');
+      history.push(j.aiKey);
+      lastMove = [j.aiMove.from, j.aiMove.to];
+      logMove('黑', aiText);
+      if (j.gameOver) return finish(OVER_ICON[j.gameOver] + j.message);
+      await fetchMoves();
+      setStatus(j.checkRed ? '⚠️ 黑方将军！请应将' : '轮到红方走棋',
+                '黑方走了：' + aiText + (j.depth ? '（搜索深度 ' + j.depth + '）' : ''));
+    } else {
+      // 手动模式：只提交这半步，不触发 AI
+      const j = await api('/api/usermove', {
+        board: prevBoard.join(''), history, from: f, to: t, side: mover });
+      history.push(j.key);
+      board = j.board.split('');
+      if (j.gameOver) return finish(OVER_ICON[j.gameOver] + j.message);
+      turn = mover === 'r' ? 'b' : 'r';
+      await fetchMoves();
+      if (j.check) {
+        setStatus('⚠️ ' + (turn === 'r' ? '黑方将军！请应将' : '红方将军！请代黑方应将'), '');
+      } else turnStatus();
+    }
+  } catch (e) {
+    await restoreSnap();
+    toast(e.message);
+    turnStatus();
+  } finally { busy = false; render(); }
+}
+
+async function aiPlay() {
+  if (mode !== 'play' || busy || turn !== 'b') return;
+  snapshot();
+  busy = true; sel = -1; hintMove = null; render();
+  setStatus('<span class="spin"></span>黑方 AI 思考中…', '');
+  try {
+    const j = await api('/api/aimove', { board: boardStr(), history, time: level() });
+    const aiText = moveText(board, j.aiMove.from, j.aiMove.to);
+    board = j.board.split('');
+    history.push(j.aiKey);
+    lastMove = [j.aiMove.from, j.aiMove.to];
+    logMove('黑', aiText);
+    if (j.gameOver) return finish(OVER_ICON[j.gameOver] + j.message);
+    turn = 'r';
+    await fetchMoves();
+    setStatus(j.checkRed ? '⚠️ 黑方将军！请应将' : '轮到红方走棋', '黑方走了：' + aiText);
+  } catch (e) {
+    await restoreSnap();
+    toast(e.message);
+    turnStatus();
+  } finally { busy = false; render(); }
+}
+
+function finish(msg) {
+  mode = 'over';
+  setStatus(msg, '可点「悔棋」回到上一步继续研究，或「重试本局」重新来过');
+  busy = false; render();
+}
+
+async function hint() {
+  if (mode !== 'play' || busy) return;
+  if (turn === 'b' && !manualBlack()) return;
+  busy = true;
+  setStatus('<span class="spin"></span>正在计算最佳走法…', '');
+  try {
+    const j = await api('/api/hint', { board: boardStr(), history, time: level(), side: turn });
+    hintMove = [j.from, j.to]; sel = -1;
+    setStatus('💡 建议' + (turn === 'b' ? '（黑方）' : '') + '：<span style="color:#15803d">' +
+              moveText(board, j.from, j.to) + '</span>',
+              '绿色虚线箭头即建议走法（搜索深度 ' + j.depth + '）');
+  } catch (e) { toast(e.message); turnStatus(); }
+  finally { busy = false; render(); }
+}
+
+async function undo() {
+  if (busy || !snaps.length) { if (!snaps.length) toast('没有可悔的棋'); return; }
+  const s = snaps.pop();
+  board = s.board; history = s.history; turn = s.turn; lastMove = s.lastMove;
+  moveNo = s.moveNo; $('moveLog').innerHTML = s.log;
+  if (!$('moveLog').innerHTML) $('moveLog').hidden = true;
+  sel = -1; hintMove = null; mode = 'play';
+  await fetchMoves();
+  turnStatus('已悔棋');
+  render();
+}
+
+async function retry() {
+  if (busy || !startBoard) return;
+  board = startBoard.slice();
+  history = [boardStr() + 'r'];
+  snaps = []; sel = -1; lastMove = null; hintMove = null; moveNo = 0; turn = 'r';
+  $('moveLog').innerHTML = ''; $('moveLog').hidden = true;
+  mode = 'play';
+  await fetchMoves();
+  setStatus('已重置到开局，请红方走棋', '');
+  render();
+}
+
+function backToSetup() {
+  if (busy) return;
+  if (startBoard) board = startBoard.slice();
+  mode = 'setup'; sel = -1; lastMove = null; hintMove = null;
+  $('setupPanel').hidden = false; $('playPanel').hidden = true;
+  setStatus('布置残局：先点选下方棋子，再点击棋盘放置', '红方为玩家（下方），黑方为 AI（上方）');
+  refreshPalette(); render();
+}
+
+/* ---------- 局面导出 / 导入 ---------- */
+const FULL_DIGIT = '０１２３４５６７８９';
+// 导出用字符：黑方馬/車改用简体，避免与红方混淆
+const EX_CHARS = Object.assign({}, CHARS, { n: '马', r: '车' });
+function exportText() {
+  const lines = ['【中国象棋残局导出】'];
+  const sideChar = mode === 'setup' ? 'r' : turn;
+  lines.push('局面代码: ' + boardStr() + sideChar);
+  if (mode === 'setup') lines.push('状态: 布局中（红方为玩家执红先行，黑方为 AI）');
+  else if (mode === 'over') lines.push('状态: 对局已结束');
+  else lines.push('状态: 对弈中，轮到' + (turn === 'r' ? '红方' : '黑方') + '走棋');
+  lines.push('');
+  lines.push('盘面（行0=黑方底线在上，行9=红方底线在下；列0-8从左到右）:');
+  lines.push('红方棋子: 帥仕相馬車炮兵；黑方棋子: 將士象马车砲卒');
+  lines.push('　　列０１２３４５６７８');
+  for (let r = 0; r < 10; r++) {
+    let row = '行' + FULL_DIGIT[r] + '：　';
+    for (let c = 0; c < 9; c++) {
+      const p = board[r * 9 + c];
+      row += p === '.' ? '・' : EX_CHARS[p];
+    }
+    if (r === 4) row += '　←楚河';
+    if (r === 5) row += '　←汉界';
+    lines.push(row);
+  }
+  lines.push('');
+  const list = side => {
+    const arr = [];
+    for (let i = 0; i < 90; i++) {
+      const p = board[i];
+      if (p === '.' || (p === p.toUpperCase()) !== (side === 'r')) continue;
+      arr.push(EX_CHARS[p] + '(行' + Math.floor(i / 9) + ',列' + (i % 9) + ')');
+    }
+    return arr.length ? arr.join(' ') : '（无）';
+  };
+  lines.push('红方子力: ' + list('r'));
+  lines.push('黑方子力: ' + list('b'));
+  const log = $('moveLog').innerText.trim();
+  if (log) {
+    lines.push('');
+    lines.push('已走着法:');
+    lines.push(log);
+  }
+  return lines.join('\n');
+}
+
+function showModal(title, text, forImport) {
+  $('mtitle').textContent = title;
+  $('mtext').value = text;
+  $('mtext').placeholder = forImport ? '把导出的局面文本（或 90 字符局面代码）粘贴到这里…' : '';
+  $('mload').hidden = !forImport;
+  $('modal').hidden = false;
+  if (!forImport) { $('mtext').focus(); $('mtext').select(); }
+}
+$('mclose').onclick = () => { $('modal').hidden = true; };
+$('modal').onclick = e => { if (e.target === $('modal')) $('modal').hidden = true; };
+$('mcopy').onclick = () => {
+  const ta = $('mtext');
+  ta.focus(); ta.select(); ta.setSelectionRange(0, ta.value.length);
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch (e) {}
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(ta.value).then(() => toast('已复制到剪贴板'));
+  } else toast(ok ? '已复制到剪贴板' : '请长按文本框全选后手动复制');
+};
+$('mload').onclick = () => {
+  const m = $('mtext').value.match(/[.KABNRCPkabnrcp]{90}/);
+  if (!m) return toast('未找到有效的 90 字符局面代码');
+  board = m[0].split('');
+  mode = 'setup'; curPiece = null; sel = -1; lastMove = null; hintMove = null;
+  $('setupPanel').hidden = false; $('playPanel').hidden = true;
+  $('modal').hidden = true;
+  refreshPalette(); render();
+  setStatus('已载入局面，检查无误后点击「开始对弈」', '');
+  toast('局面已载入');
+};
+
+/* ---------- 示例残局 ---------- */
+function loadPreset(name) {
+  board = Array(90).fill('.');
+  const put = (r, c, p) => board[r * 9 + c] = p;
+  if (name === 'mhp') {          // 马后炮杀势：红炮平中路成杀
+    put(9, 4, 'K'); put(2, 4, 'N'); put(4, 0, 'C');
+    put(0, 4, 'k'); put(6, 4, 'p');
+  } else if (name === 'pp') {    // 双兵对双士
+    put(9, 3, 'K'); put(3, 3, 'P'); put(3, 5, 'P');
+    put(0, 4, 'k'); put(0, 3, 'a'); put(0, 5, 'a');
+  }
+  curPiece = null; refreshPalette(); render();
+}
+
+/* ---------- 绑定 ---------- */
+$('exportBtn').onclick = () => showModal('导出局面（复制后发给 AI 分析）', exportText(), false);
+$('exportBtn2').onclick = () => showModal('导出局面（复制后发给 AI 分析）', exportText(), false);
+$('importBtn').onclick = () => showModal('导入局面', '', true);
+$('openingBtn').onclick = () => {
+  board = ('rnbakabnr' + '.........' + '.c.....c.' + 'p.p.p.p.p' + '.........' +
+           '.........' + 'P.P.P.P.P' + '.C.....C.' + '.........' + 'RNBAKABNR').split('');
+  curPiece = null; refreshPalette(); render();
+  setStatus('已摆好标准开局，可微调后点击「开始对弈」', '');
+};
+$('eraseBtn').onclick = () => { curPiece = curPiece === 'erase' ? null : 'erase'; refreshPalette(); };
+$('clearBtn').onclick = () => { board = Array(90).fill('.'); refreshPalette(); render(); };
+$('presetSel').onchange = e => { if (e.target.value) { loadPreset(e.target.value); e.target.value = ''; } };
+$('startBtn').onclick = startGame;
+$('hintBtn').onclick = hint;
+$('aiPlayBtn').onclick = aiPlay;
+$('blackSrc').onchange = () => {
+  render();
+  if (mode === 'play' && !busy) {
+    if (turn === 'b' && !manualBlack()) aiPlay();   // 切回本机 AI 时立即补走黑棋
+    else turnStatus();
+  }
+};
+$('undoBtn').onclick = undo;
+$('retryBtn').onclick = retry;
+$('setupBtn').onclick = backToSetup;
+
+document.getElementById('intlLink').href =
+  location.protocol + '//' + location.hostname + ':8766/';
+buildPalette();
+refreshPalette();
+resize();
+restoreState();   // 断线/刷新/重开页面后恢复上次对局
+</script>
+</body>
+</html>
