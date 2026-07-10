@@ -113,7 +113,8 @@
         <select id="presetSel">
           <option value="">— 载入示例残局 —</option>
           <option value="kqk">后杀单王（基本杀法）</option>
-          <option value="kpk">王兵对王（关键格练习）</option>
+          <option value="kpk">王兵对王·白可胜（王占兵前两格）</option>
+          <option value="kpkdraw">王兵对王·和棋（黑有对王，防守精确则和）</option>
           <option value="krk">车杀单王（基本杀法）</option>
         </select>
       </div>
@@ -776,7 +777,8 @@ function loadPreset(name) {
     board[r * 8 + c] = p;
   };
   if (name === 'kqk') { put('e3', 'K'); put('d3', 'Q'); put('e7', 'k'); }
-  else if (name === 'kpk') { put('e5', 'K'); put('e4', 'P'); put('e7', 'k'); }
+  else if (name === 'kpk') { put('e6', 'K'); put('e4', 'P'); put('e8', 'k'); }
+  else if (name === 'kpkdraw') { put('e5', 'K'); put('e4', 'P'); put('e7', 'k'); }
   else if (name === 'krk') { put('e3', 'K'); put('a1', 'R'); put('d6', 'k'); }
   curPiece = null; refreshPalette(); render();
 }
