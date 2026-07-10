@@ -684,8 +684,9 @@ def perpetual_banned(board, side, history):
     return banned
 
 
-def repetition_penalties(board, side, history, weight=120):
-    """对首次重现历史局面的走法轻度扣分（封顶，避免罚分大到促使 AI 弃子"换新局面"）。
+def repetition_penalties(board, side, history, weight=45):
+    """对重现历史局面的走法轻度扣分：仅在近似等价的选择间引导走新变化，
+    绝不该大到让 AI 为避重复而接受实质亏损（对方发起的重复，跟着回头是正当应法）。
     三次重复由 draw_moves 机制精确按和棋(0分)处理，不在此列。"""
     pen = {}
     if not history:

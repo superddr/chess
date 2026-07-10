@@ -189,10 +189,9 @@ def _apply_user_move(board, history, side, frm, to):
 def _ai_reply(board, history, tl):
     """黑方 AI 在当前局面走一步，返回结果字段（board 会被修改）。"""
     board_before = ''.join(board)
-    # 走回头路（重现任何历史局面）的着法一律禁止，除非无路可走——
-    # 败势下也必须走新变化，不许无聊地来回拖延
-    seen = E.draw_moves_of(board, E.BLACK, history, 1)
-    banned = E.perpetual_banned(board, E.BLACK, history) | seen
+    # 回头路不做硬禁：对方发起的重复，跟着回头是正当应法（如守型只有一个好位置）。
+    # 轻罚分引导优先走新变化；无聊拖延由"三次重复判和/长将判负"裁决兜底。
+    banned = E.perpetual_banned(board, E.BLACK, history)
     pen = E.repetition_penalties(board, E.BLACK, history)
     dm = E.draw_moves_of(board, E.BLACK, history)
     out = {}

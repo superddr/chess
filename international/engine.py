@@ -646,7 +646,7 @@ def key_of(board, side, ep):
     return ''.join(board) + ('w' if side == WHITE else 'b') + str(ep)
 
 
-def repetition_penalties(board, side, ep, history, weight=120):
+def repetition_penalties(board, side, ep, history, weight=45):
     pen = {}
     if not history:
         return pen
