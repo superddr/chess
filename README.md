@@ -1,6 +1,11 @@
 # 中国象棋残局研究器
 
-> 国际象棋版在 [international/](international/) 子目录（端口 8766），功能一致，两个页面可互跳。
+> **🌐 纯网页版（推荐）**：https://superddr.github.io/chess/ ——引擎已整体移植到
+> JS Web Worker，浏览器本地计算（速度反超 Python 多进程版），无需任何安装，手机直接玩。
+> 源码在 [web/](web/)，部署命令：`git subtree split --prefix=web -b t && git push -f origin t:gh-pages && git branch -D t`
+>
+> 以下为 Python 本地版说明（含对局监控日志等研究工具）。国际象棋版在
+> [international/](international/) 子目录（端口 8766），功能一致，两个页面可互跳。
 
 本地运行的中国象棋残局研究工具：手工摆残局，红方（玩家）对黑方（AI）。
 

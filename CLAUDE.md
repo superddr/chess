@@ -5,6 +5,16 @@
 
 ## 结构与运行
 
+**当前主形态是纯网页版** `web/`（引擎移植为 JS Web Worker，托管 GitHub Pages：
+https://superddr.github.io/chess/ ，gh-pages 分支）。JS 单线程速度反超 Python 7 进程
+（同局面 Python 2s → JS 0.36s），语义与 Python 版逐条对齐（评分一致）。
+接口协议与原 HTTP API 同构（HANDLERS['/api/...']），前端只把 fetch 换成了 worker RPC。
+JS 测试：`docker run --rm -v <repo>:/repo node:20-alpine node /repo/tests/js/test_xiangqi.js`
+（本机无 node，用 docker 跑；perft 与杀法用例齐全）。
+部署：`git subtree split --prefix=web -b t && git push -f origin t:gh-pages && git branch -D t`。
+移植教训：JS 版 inPalace 曾漏行边界产生越界幽灵走法——移植时边界条件逐个核对。
+Python 版保留（对局监控日志 game_log.jsonl 等研究工具仍在其中）。
+
 - 根目录 = 中国象棋（端口 8765）；`international/` = 国际象棋（8766）。零第三方依赖。
 - 每套三个文件：`engine.py`（规则+搜索）、`server.py`（HTTP+任务系统）、`index.html`（Canvas 前端）。
 - 本地跑：`python server.py [端口]`；Docker：`docker build -t xiangqi-endgame . && docker run -d --name xiangqi --restart unless-stopped -p 8765:8765 xiangqi-endgame`。
