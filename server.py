@@ -111,6 +111,48 @@ def side_param(data):
     return E.BLACK if data.get('side') == 'b' else E.RED
 
 
+# ---------------- 主变例缓存：整条 PV 沿线的局面→最佳应招 ----------------
+PV_LOCK = threading.Lock()
+PV_CACHE = {}   # 局面key -> (走法, 支撑深度)
+
+
+def _store_pv(board_str, side, pv, reached):
+    """把一次深算得到的主变例整条缓存。第 i 步的支撑深度 = reached - i，
+    低于 6 层的尾巴不缓存（依据太薄，宁可真算）。"""
+    if not pv:
+        return
+    b = list(board_str)
+    s = side
+    with PV_LOCK:
+        if len(PV_CACHE) > 2000:
+            PV_CACHE.clear()
+        for i, m in enumerate(pv):
+            backing = reached - i
+            if backing < 6:
+                break
+            m = tuple(m)
+            PV_CACHE[E.key_of(b, s)] = (m, backing)
+            E.make(b, m)
+            s = -s
+
+
+def _probe_pv(board, side, history):
+    """主变例缓存命中：走法合法、非长将禁着、不立即构成三次重复时直接采用。"""
+    with PV_LOCK:
+        hit = PV_CACHE.get(E.key_of(board, side))
+    if not hit:
+        return None
+    mv, backing = hit
+    if mv not in E.legal_moves(board, side):
+        return None
+    cap = E.make(board, mv)
+    key2 = E.key_of(board, -side)
+    E.unmake(board, mv, cap)
+    if history.count(key2) >= 2:
+        return None
+    return mv, backing
+
+
 def api_moves(data):
     board = parse_board(data)
     side = side_param(data)
@@ -123,6 +165,14 @@ def api_hint(data):
     board = parse_board(data)
     history = data.get('history', []) or []
     side = side_param(data)
+    probe = _probe_pv(board, side, history)
+    if probe:
+        mv, backing = probe
+        log_event('hint', {'side': 'r' if side == E.RED else 'b',
+                           'board': ''.join(board), 'move': [mv[0], mv[1]],
+                           'score': None, 'depth': backing, 'note': '主变例缓存'})
+        return {'ok': True, 'from': mv[0], 'to': mv[1], 'score': 0,
+                'depth': backing, 'cached': True}
     banned = E.perpetual_banned(board, side, history)
     pen = E.repetition_penalties(board, side, history)
     dm = E.draw_moves_of(board, side, history)
@@ -131,6 +181,7 @@ def api_hint(data):
                                      history, out)
     if mv is None:
         return {'ok': False, 'error': '当前没有可走的棋'}
+    _store_pv(''.join(board), side, out.get('pv') or [], depth)
     log_event('hint', {'side': 'r' if side == E.RED else 'b',
                        'board': ''.join(board), 'move': [mv[0], mv[1]],
                        'score': score, 'depth': depth,
@@ -189,13 +240,19 @@ def _apply_user_move(board, history, side, frm, to):
 def _ai_reply(board, history, tl):
     """黑方 AI 在当前局面走一步，返回结果字段（board 会被修改）。"""
     board_before = ''.join(board)
-    # 回头路不做硬禁：对方发起的重复，跟着回头是正当应法（如守型只有一个好位置）。
-    # 轻罚分引导优先走新变化；无聊拖延由"三次重复判和/长将判负"裁决兜底。
-    banned = E.perpetual_banned(board, E.BLACK, history)
-    pen = E.repetition_penalties(board, E.BLACK, history)
-    dm = E.draw_moves_of(board, E.BLACK, history)
-    out = {}
-    mv, score, depth = E.search_best(board, E.BLACK, tl, banned, pen, dm, history, out)
+    probe = _probe_pv(board, E.BLACK, history)
+    if probe:
+        mv, depth = probe
+        score, out = None, {'note': '主变例缓存直走'}
+    else:
+        # 回头路不做硬禁：对方发起的重复，跟着回头是正当应法（如守型只有一个好位置）。
+        # 轻罚分引导优先走新变化；无聊拖延由"三次重复判和/长将判负"裁决兜底。
+        banned = E.perpetual_banned(board, E.BLACK, history)
+        pen = E.repetition_penalties(board, E.BLACK, history)
+        dm = E.draw_moves_of(board, E.BLACK, history)
+        out = {}
+        mv, score, depth = E.search_best(board, E.BLACK, tl, banned, pen, dm, history, out)
+        _store_pv(board_before, E.BLACK, out.get('pv') or [], depth)
     E.make(board, mv)
     ai_key = E.key_of(board, E.RED)
     check_red = E.in_check(board, E.RED)

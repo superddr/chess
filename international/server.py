@@ -87,16 +87,63 @@ def api_moves(data):
             'check': E.in_check(board, side)}
 
 
+# ---------------- 主变例缓存 ----------------
+PV_LOCK = threading.Lock()
+PV_CACHE = {}   # 局面key -> (走法, 支撑深度)
+
+
+def _store_pv(board_str, side, ep, pv, reached):
+    if not pv:
+        return
+    b = list(board_str)
+    s = side
+    with PV_LOCK:
+        if len(PV_CACHE) > 2000:
+            PV_CACHE.clear()
+        for i, m in enumerate(pv):
+            backing = reached - i
+            if backing < 6:
+                break
+            m = tuple(m)
+            PV_CACHE[E.key_of(b, s, ep)] = (m, backing)
+            _, ep = E.make(b, m, ep)
+            s = -s
+
+
+def _probe_pv(board, side, ep, history):
+    with PV_LOCK:
+        hit = PV_CACHE.get(E.key_of(board, side, ep))
+    if not hit:
+        return None
+    mv, backing = hit
+    if mv not in E.legal_moves(board, side, ep):
+        return None
+    undo, nep = E.make(board, mv, ep)
+    key2 = E.key_of(board, -side, nep)
+    E.unmake(board, mv, undo)
+    if history.count(key2) >= 2:
+        return None
+    return mv, backing
+
+
 def api_hint(data):
     board = parse_board(data)
     ep = parse_ep(data)
     history = data.get('history', []) or []
     side = side_param(data)
+    probe = _probe_pv(board, side, ep, history)
+    if probe:
+        mv, backing = probe
+        return {'ok': True, 'from': mv[0], 'to': mv[1], 'score': 0,
+                'depth': backing, 'cached': True}
     pen = E.repetition_penalties(board, side, ep, history)
     dm = E.draw_moves_of(board, side, ep, history)
-    mv, score, depth = E.search_best(board, side, ep, clamp_time(data), pen, dm, history)
+    out = {}
+    mv, score, depth = E.search_best(board, side, ep, clamp_time(data), pen, dm,
+                                     history, out)
     if mv is None:
         return {'ok': False, 'error': '当前没有可走的棋'}
+    _store_pv(''.join(board), side, ep, out.get('pv') or [], depth)
     return {'ok': True, 'from': mv[0], 'to': mv[1], 'score': score, 'depth': depth}
 
 
@@ -124,9 +171,17 @@ def _apply_user_move(board, ep, history, side, frm, to):
 
 
 def _ai_reply(board, ep, history, tl):
-    pen = E.repetition_penalties(board, E.BLACK, ep, history)
-    dm = E.draw_moves_of(board, E.BLACK, ep, history)
-    mv, score, depth = E.search_best(board, E.BLACK, ep, tl, pen, dm, history)
+    probe = _probe_pv(board, E.BLACK, ep, history)
+    if probe:
+        mv, depth = probe
+        score = None
+    else:
+        board_before = ''.join(board)
+        pen = E.repetition_penalties(board, E.BLACK, ep, history)
+        dm = E.draw_moves_of(board, E.BLACK, ep, history)
+        out = {}
+        mv, score, depth = E.search_best(board, E.BLACK, ep, tl, pen, dm, history, out)
+        _store_pv(board_before, E.BLACK, ep, out.get('pv') or [], depth)
     _, new_ep = E.make(board, mv, ep)
     ai_key = E.key_of(board, E.WHITE, new_ep)
     check_w = E.in_check(board, E.WHITE)

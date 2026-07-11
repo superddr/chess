@@ -498,8 +498,31 @@ def pool_workers():
     return pool._processes if pool else 1
 
 
+def _pv_walk(tt, board, side, ep, limit=24):
+    """沿置换表最佳走法链提取主变例。"""
+    pv = []
+    b = list(board)
+    s = side
+    seen = set()
+    for _ in range(limit):
+        key = (''.join(b), s, ep)
+        if key in seen:
+            break
+        seen.add(key)
+        e = tt.get(key)
+        if not e or e[3] is None:
+            break
+        m = e[3]
+        if m not in gen_pseudo(b, s, ep):
+            break
+        _, ep = make(b, m, ep)
+        pv.append(m)
+        s = -s
+    return pv
+
+
 def _search_root_move(args):
-    """alpha0 为根下界：明显更差的走法快速失败，节省节点"""
+    """alpha0 为根下界：明显更差的走法快速失败，节省节点。同时返回主变例。"""
     board_str, side, ep, m, depth, deadline, histcnt, alpha0 = args
     if len(_TT_WORKER) > 2_000_000:
         _TT_WORKER.clear()
@@ -509,9 +532,10 @@ def _search_root_move(args):
     S = Searcher(deadline, seed, histcnt)
     S.tt = _TT_WORKER
     try:
-        return m, -S.negamax(board, -side, nep, depth - 1, -INF, -alpha0, 1)
+        sc = -S.negamax(board, -side, nep, depth - 1, -INF, -alpha0, 1)
+        return m, sc, _pv_walk(_TT_WORKER, board, -side, nep)
     except Timeout:
-        return m, None
+        return m, None, []
 
 
 def _stable_min_depth(budget):
@@ -529,6 +553,7 @@ def _search_parallel(board, allowed, side, ep, penalty, deadline, histcnt=None):
     min_d = _stable_min_depth(deadline - time.time())
     best, best_sc, reached = allowed[0], -INF, 0
     scores = {}
+    pvs = {}
     stable = 0
     raw_best = -INF
     depth = 1
@@ -541,17 +566,18 @@ def _search_parallel(board, allowed, side, ep, penalty, deadline, histcnt=None):
             results = pool.map(_search_root_move, args)
         except Exception:
             break
-        if any(sc is None for _, sc in results):
+        if any(r[1] is None for r in results):
             break
-        cur_raw = max(sc for _, sc in results)
+        cur_raw = max(r[1] for r in results)
         if alpha0 > -INF and cur_raw <= alpha0:
             raw_best = -INF   # 全体低于下界，本层全窗口重搜
             continue
         raw_best = cur_raw
         cur_best, cur_sc = None, -INF
-        for m, sc in results:
+        for m, sc, pv in results:
             sc -= penalty.get(m, 0)
             scores[m] = sc
+            pvs[m] = pv
             if sc > cur_sc:
                 cur_sc, cur_best = sc, m
         stable = stable + 1 if cur_best == best else 1
@@ -564,7 +590,7 @@ def _search_parallel(board, allowed, side, ep, penalty, deadline, histcnt=None):
             if best_sc - second > 250 or stable >= 5:
                 break
         depth += 1
-    return best, best_sc, reached
+    return best, best_sc, reached, pvs.get(best, [])
 
 
 def _search_serial(board, allowed, side, ep, penalty, deadline, histcnt=None):
@@ -595,12 +621,16 @@ def _search_serial(board, allowed, side, ep, penalty, deadline, histcnt=None):
                     break
         except Timeout:
             break
-    return best, best_sc, reached
+    bb = list(board)
+    _, nep = make(bb, best, ep)
+    pv = _pv_walk(S.tt, bb, -side, nep)
+    return best, best_sc, reached, pv
 
 
-def search_best(board, side, ep, time_limit=2.0, penalty=None, draw_moves=(), history=None):
+def search_best(board, side, ep, time_limit=2.0, penalty=None, draw_moves=(), history=None,
+                out=None):
     """迭代加深搜索最佳走法。draw_moves 构成三次重复判和，按精确 0 分处理；
-    history 供树内三次重复检测。返回 (move, score, depth)。"""
+    history 供树内三次重复检测；out 可回收主变例等信息。返回 (move, score, depth)。"""
     deadline = time.time() + time_limit
     moves = legal_moves(board, side, ep)
     if not moves:
@@ -631,10 +661,15 @@ def search_best(board, side, ep, time_limit=2.0, penalty=None, draw_moves=(), hi
         except Timeout:
             best_sc = -evaluate(board, -side)
         unmake(board, rest[0], undo)
+        best_pv = []
     elif _get_pool() is not None:
-        best, best_sc, reached = _search_parallel(board, rest, side, ep, penalty, deadline, histcnt)
+        best, best_sc, reached, best_pv = _search_parallel(
+            board, rest, side, ep, penalty, deadline, histcnt)
     else:
-        best, best_sc, reached = _search_serial(board, rest, side, ep, penalty, deadline, histcnt)
+        best, best_sc, reached, best_pv = _search_serial(
+            board, rest, side, ep, penalty, deadline, histcnt)
+    if out is not None:
+        out['pv'] = [best] + list(best_pv)
     if draws and best_sc < 0:
         return draws[0], 0, reached
     return best, best_sc, reached
