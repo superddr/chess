@@ -200,6 +200,32 @@ JOBS_LOCK = threading.Lock()
 JOB_TTL = 900
 
 
+def _chain_after(path, data, result, chain):
+    """链式预思考：move 完成→预算"求助"；求助出来→预算"照提示走后的应招"。"""
+    if chain >= 2 or not isinstance(result, dict) or not result.get('ok'):
+        return
+    try:
+        if path in ('/api/move', '/api/aimove'):
+            if result.get('gameOver') or not result.get('aiMove'):
+                return
+            hist = list(data.get('history') or [])
+            if path == '/api/move':
+                hist += [result['playerKey'], result['aiKey']]
+            else:
+                hist += [result['aiKey']]
+            submit_job('/api/hint', api_hint,
+                       {'board': result['board'], 'ep': result['ep'], 'history': hist,
+                        'time': data.get('time', 16), 'side': 'w'}, chain + 1)
+        elif path == '/api/hint' and data.get('side', 'w') == 'w':
+            submit_job('/api/move', api_move,
+                       {'board': data['board'], 'ep': data.get('ep', -1),
+                        'history': list(data.get('history') or []),
+                        'from': result['from'], 'to': result['to'],
+                        'time': data.get('time', 16)}, chain + 1)
+    except Exception:
+        pass
+
+
 def _run_job(jid, fn, data):
     try:
         result = fn(data)
@@ -210,10 +236,15 @@ def _run_job(jid, fn, data):
         if job is not None:
             job['result'] = result
             job['done'] = True
+            path, chain = job['path'], job['chain']
+        else:
+            path, chain = '', 9
+    _chain_after(path, data, result, chain)
 
 
-def submit_job(path, fn, data):
-    """短暂等待：快棋直接随提交响应同步返回，免去轮询延迟。"""
+def submit_job(path, fn, data, chain=0):
+    """任务按请求内容哈希去重；玩家照提示走棋会命中链式预思考已算好的任务。
+    短暂等待：快棋直接随提交响应同步返回，免去轮询延迟。"""
     raw = json.dumps(data, sort_keys=True, ensure_ascii=False)
     jid = hashlib.md5((path + '|' + raw).encode('utf-8')).hexdigest()
     th = None
@@ -221,16 +252,24 @@ def submit_job(path, fn, data):
         now = time.time()
         for k in [k for k, v in JOBS.items() if now - v['t'] > JOB_TTL]:
             del JOBS[k]
-        if jid not in JOBS:
-            JOBS[jid] = {'t': now, 'done': False, 'result': None}
+        job = JOBS.get(jid)
+        if job is None:
+            JOBS[jid] = {'t': now, 'done': False, 'result': None,
+                         'path': path, 'chain': chain}
             th = threading.Thread(target=_run_job, args=(jid, fn, data), daemon=True)
+        elif chain < job['chain']:
+            job['chain'] = chain
     if th:
         th.start()
         th.join(0.35)
     with JOBS_LOCK:
         job = JOBS.get(jid)
-        if job and job['done']:
-            return {'ok': True, 'job': jid, 'status': 'done', 'result': job['result']}
+        done = job and job['done']
+        result = job['result'] if done else None
+        cur_chain = job['chain'] if job else chain
+    if done:
+        _chain_after(path, data, result, cur_chain)
+        return {'ok': True, 'job': jid, 'status': 'done', 'result': result}
     return {'ok': True, 'job': jid}
 
 

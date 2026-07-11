@@ -281,6 +281,33 @@ JOBS_LOCK = threading.Lock()
 JOB_TTL = 900      # 结果保留 15 分钟
 
 
+def _chain_after(path, data, result, chain):
+    """链式预思考：move 完成→预算"求助"答案；求助答案出来→预算
+    "玩家照提示走后 AI 的应招"。链深受限，真实客户端请求命中缓存时
+    以链深 0 重新续链，使预思考始终领先玩家一到两步。"""
+    if chain >= 2 or not isinstance(result, dict) or not result.get('ok'):
+        return
+    try:
+        if path in ('/api/move', '/api/aimove'):
+            if result.get('gameOver') or not result.get('aiMove'):
+                return
+            hist = list(data.get('history') or [])
+            if path == '/api/move':
+                hist += [result['playerKey'], result['aiKey']]
+            else:
+                hist += [result['aiKey']]
+            submit_job('/api/hint', api_hint,
+                       {'board': result['board'], 'history': hist,
+                        'time': data.get('time', 16), 'side': 'r'}, chain + 1)
+        elif path == '/api/hint' and data.get('side', 'r') == 'r':
+            submit_job('/api/move', api_move,
+                       {'board': data['board'], 'history': list(data.get('history') or []),
+                        'from': result['from'], 'to': result['to'],
+                        'time': data.get('time', 16)}, chain + 1)
+    except Exception:
+        pass
+
+
 def _run_job(jid, fn, data):
     try:
         result = fn(data)
@@ -291,12 +318,16 @@ def _run_job(jid, fn, data):
         if job is not None:
             job['result'] = result
             job['done'] = True
+            path, chain = job['path'], job['chain']
+        else:
+            path, chain = '', 9
+    _chain_after(path, data, result, chain)
 
 
-def submit_job(path, fn, data):
+def submit_job(path, fn, data, chain=0):
     """任务 id 由请求内容哈希而来：断线后客户端重发同一请求会命中同一个
-    正在计算的任务，而不是重新起一个。
-    短暂等待一下：快棋（唯一应法等）直接随提交响应同步返回，免去轮询延迟。"""
+    正在计算的任务；玩家照提示走棋会命中链式预思考已算好的任务。
+    短暂等待一下：快棋直接随提交响应同步返回，免去轮询延迟。"""
     raw = json.dumps(data, sort_keys=True, ensure_ascii=False)
     jid = hashlib.md5((path + '|' + raw).encode('utf-8')).hexdigest()
     th = None
@@ -304,16 +335,24 @@ def submit_job(path, fn, data):
         now = time.time()
         for k in [k for k, v in JOBS.items() if now - v['t'] > JOB_TTL]:
             del JOBS[k]
-        if jid not in JOBS:
-            JOBS[jid] = {'t': now, 'done': False, 'result': None}
+        job = JOBS.get(jid)
+        if job is None:
+            JOBS[jid] = {'t': now, 'done': False, 'result': None,
+                         'path': path, 'chain': chain}
             th = threading.Thread(target=_run_job, args=(jid, fn, data), daemon=True)
+        elif chain < job['chain']:
+            job['chain'] = chain   # 真实请求命中预思考任务：链深归零以便续链
     if th:
         th.start()
         th.join(0.35)
     with JOBS_LOCK:
         job = JOBS.get(jid)
-        if job and job['done']:
-            return {'ok': True, 'job': jid, 'status': 'done', 'result': job['result']}
+        done = job and job['done']
+        result = job['result'] if done else None
+        cur_chain = job['chain'] if job else chain
+    if done:
+        _chain_after(path, data, result, cur_chain)  # 命中缓存也要续链
+        return {'ok': True, 'job': jid, 'status': 'done', 'result': result}
     return {'ok': True, 'job': jid}
 
 
